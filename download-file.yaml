@@ -1,0 +1,50 @@
+# This workflow demonstrates the use of a generator step which produces a list of items as a result.
+# This list is subsequently used for expanding the next step into multiple parallel steps.
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: distributed-download-result-
+spec:
+  entrypoint: distributed-download
+  templates:
+  - name: distributed-download
+    steps:
+    - - name: generate
+        template: gen-files-to-download
+    - - name: download
+        template: download
+        arguments:
+          parameters:
+          - name: file
+            value: "{{item}}"
+        withParam: "{{steps.generate.outputs.result}}"
+
+  - name: gen-files-to-download
+    script:
+      image: python:alpine3.11
+      command: [python]
+      source: |
+        import urllib.request
+        import json
+        url = 'https://raw.githubusercontent.com/ItielOlenick/playground/master/example.txt'
+        local_path = 'list.txt'
+        urllib.request.urlretrieve(url, local_path)
+        with open('list.txt', 'r') as f:
+            my_list = f.read().splitlines()
+            my_json_array = json.dumps(my_list)
+            print(my_json_array)
+
+
+  - name: download
+    synchronization:
+        semaphore:
+          configMapKeyRef:
+            name: argowf-semaphore
+            key: download-jobs
+    inputs:
+      parameters:
+      - name: file
+    container:
+      image: alpine:latest
+      command: [sh, -c]
+      args: ["echo downloading {{inputs.parameters.file}}; wget {{inputs.parameters.file}} -O text.txt; cat text.txt"]
